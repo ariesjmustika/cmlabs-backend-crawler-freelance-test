@@ -32,16 +32,15 @@ class SPAStrategy extends BaseStrategy {
                      document.querySelector('[data-reactroot]');
 
         if (root) {
-          return root.children.length > 0 && root.textContent.trim().length > 100;
+          // Verify that the root container actually has rendered content
+          return root.innerHTML.length > 500;
         }
 
         // Fallback: body has substantial content
-        return document.body.textContent.trim().length > 500;
-      }, { timeout: 10000 }).catch(() => {
-        this.log.debug('SPA container wait timed out, proceeding anyway');
-      });
+        return document.body.innerHTML.length > 1000;
+      }, { timeout: 10000 });
     } catch (error) {
-      this.log.debug('Post-load SPA check skipped', { error: error.message });
+      this.log.debug('SPA container wait timed out or failed', { error: error.message });
     }
   }
 }

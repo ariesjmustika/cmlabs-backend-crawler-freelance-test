@@ -112,22 +112,27 @@ async function executeCrawl(url, outputDir, domainDir, options) {
 
     // Write all outputs in parallel
     const [htmlPath, screenshotPath] = await Promise.all([
-      writeHtml(htmlContent, outputDir),
+      writeHtml(htmlContent, outputDir, url),
       takeScreenshot(page, outputDir, { fullPage: options.fullPage !== false }),
     ]);
+
+    // Apply detection updates from strategy (e.g. confirming PWA via SW controller)
+    const finalDetection = { ...detection };
+    if (crawlData.postLoadResult?.detectionUpdate) {
+      const update = crawlData.postLoadResult.detectionUpdate;
+      finalDetection.confidence = update.confidence;
+      finalDetection.signals.push(update.signal);
+      log.info(`Detection refined: ${update.signal} (New Confidence: ${update.confidence}%)`);
+    }
 
     // Build result with file paths
     const result = {
       ...crawlData,
-      detection: {
-        type: detection.type,
-        confidence: detection.confidence,
-        signals: detection.signals,
-      },
+      detection: finalDetection,
       files: {
-        html: path.relative(process.cwd(), htmlPath),
-        screenshot: path.relative(process.cwd(), screenshotPath),
-        json: path.relative(process.cwd(), path.join(outputDir, 'metadata.json')),
+        html: path.relative(process.cwd(), htmlPath).replace(/\\/g, '/'),
+        screenshot: path.relative(process.cwd(), screenshotPath).replace(/\\/g, '/'),
+        json: path.relative(process.cwd(), path.join(outputDir, 'metadata.json')).replace(/\\/g, '/'),
       },
       fromCache: false,
     };

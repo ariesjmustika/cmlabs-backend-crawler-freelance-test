@@ -55,7 +55,7 @@ class BaseStrategy {
     }
 
     // Perform post-load hooks (override in subclasses)
-    await this.postLoad(page, options);
+    const postLoadResult = await this.postLoad(page, options);
 
     // Extract all data in parallel
     const [metadata, links, assets, performance] = await Promise.all([
@@ -77,6 +77,7 @@ class BaseStrategy {
       performance,
       links,
       assets,
+      postLoadResult,
     };
   }
 
@@ -138,15 +139,21 @@ class BaseStrategy {
    */
   async extractLinks(page, baseUrl) {
     return page.evaluate((base) => {
-      const origin = new URL(base).origin;
+      const normalizeHostname = (hostname) => hostname.replace(/^www\./, '').toLowerCase();
+      
+      const baseUrlObj = new URL(base);
+      const baseHostNorm = normalizeHostname(baseUrlObj.hostname);
+      
       const links = Array.from(document.querySelectorAll('a[href]'));
       const internal = new Set();
       const external = new Set();
 
       for (const link of links) {
         try {
-          const href = new URL(link.href, base).href;
-          if (href.startsWith(origin)) {
+          const urlObj = new URL(link.href, base);
+          const href = urlObj.href;
+          
+          if (normalizeHostname(urlObj.hostname) === baseHostNorm) {
             internal.add(href);
           } else if (href.startsWith('http')) {
             external.add(href);
@@ -172,27 +179,54 @@ class BaseStrategy {
    */
   async extractAssets(page) {
     return page.evaluate(() => {
-      const images = Array.from(document.querySelectorAll('img[src]'))
-        .map(img => ({
-          src: img.src,
+      const getAbsUrl = (url) => {
+        if (!url) return null;
+        try { return new URL(url, window.location.href).href; } catch (e) { return url; }
+      };
+
+      // 1. Regular images
+      const imgElements = Array.from(document.querySelectorAll('img'));
+      const images = imgElements.map(img => {
+        const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-original');
+        if (!src) return null;
+        return {
+          src: getAbsUrl(src),
           alt: img.alt || null,
-          width: img.naturalWidth || null,
-          height: img.naturalHeight || null,
-        }));
+          width: img.naturalWidth || img.width || 0,
+          height: img.naturalHeight || img.height || 0,
+        };
+      }).filter(Boolean);
 
-      const scripts = Array.from(document.querySelectorAll('script[src]'))
-        .map(s => s.src);
+      // 2. Background images from elements
+      const allElements = document.querySelectorAll('*');
+      for (const el of allElements) {
+        const bg = window.getComputedStyle(el).backgroundImage;
+        if (bg && bg !== 'none' && bg.includes('url(')) {
+          const match = bg.match(/url\(["']?([^"']+)["']?\)/);
+          if (match && match[1]) {
+            images.push({
+              src: getAbsUrl(match[1]),
+              alt: 'Background Image',
+              width: el.offsetWidth || 0,
+              height: el.offsetHeight || 0,
+            });
+          }
+        }
+      }
 
-      const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
-        .map(l => l.href);
+      // Remove duplicates
+      const uniqueImages = Array.from(new Map(images.map(img => [img.src, img])).values());
+
+      const scripts = Array.from(document.querySelectorAll('script[src]')).map(s => getAbsUrl(s.src));
+      const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(l => getAbsUrl(l.href));
 
       return {
-        images,
+        images: uniqueImages,
         scripts,
-        stylesheets,
-        totalImages: images.length,
+        stylesheets: styles,
+        totalImages: uniqueImages.length,
         totalScripts: scripts.length,
-        totalStylesheets: stylesheets.length,
+        totalStylesheets: styles.length,
       };
     });
   }

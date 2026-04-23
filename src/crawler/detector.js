@@ -25,129 +25,66 @@ function detectSiteType(url, rawHtml) {
 
   try {
     const root = parse(rawHtml);
+    const bodyText = root.querySelector('body')?.textContent.trim() || '';
 
-    // === PWA Detection ===
-    // Check for manifest link
+    // === PWA Detection (Max 100) ===
     const manifestLink = root.querySelector('link[rel="manifest"]');
-    if (manifestLink) {
-      pwaScore += 3;
-      signals.push('PWA: manifest.json link found');
-    }
+    if (manifestLink) { pwaScore += 45; signals.push('PWA: manifest link found'); }
 
-    // Check for service worker registration in inline scripts
     const scripts = root.querySelectorAll('script');
-    const inlineScriptContent = scripts
-      .map(s => s.textContent || '')
-      .join(' ');
+    const inlineScriptContent = scripts.map(s => s.textContent || '').join(' ');
+    const hasSw = inlineScriptContent.includes('serviceWorker') || root.querySelector('link[rel="serviceworker"]');
+    if (hasSw) { pwaScore += 40; signals.push('PWA: service worker detected'); }
 
-    if (inlineScriptContent.includes('serviceWorker.register') ||
-        inlineScriptContent.includes('serviceWorker')) {
-      pwaScore += 3;
-      signals.push('PWA: service worker registration detected');
+    if (root.querySelector('meta[name="theme-color"]')) { pwaScore += 10; signals.push('PWA: theme-color meta'); }
+    if (root.querySelector('link[rel="apple-touch-icon"]')) { pwaScore += 10; signals.push('PWA: apple-touch-icon'); }
+
+    // === SSR Detection (Max 100) ===
+    if (rawHtml.length > 2000) {
+      ssrScore += 60;
+      signals.push(`SSR: rawHtml > 2000 chars (${rawHtml.length})`);
     }
-
-    // Check for PWA meta tags
-    const themeColor = root.querySelector('meta[name="theme-color"]');
-    if (themeColor) {
-      pwaScore += 1;
-      signals.push('PWA: theme-color meta tag found');
-    }
-
-    const appleCapable = root.querySelector('meta[name="apple-mobile-web-app-capable"]');
-    if (appleCapable) {
-      pwaScore += 1;
-      signals.push('PWA: apple-mobile-web-app-capable meta tag found');
-    }
-
-    // === SPA Detection ===
-    // Check for empty #root or #app containers
-    const rootDiv = root.querySelector('#root') || root.querySelector('#app') || root.querySelector('#__next');
-    if (rootDiv) {
-      const rootContent = rootDiv.textContent.trim();
-      if (rootContent.length < 50) {
-        spaScore += 4;
-        signals.push(`SPA: empty container found (#${rootDiv.id})`);
-      } else {
-        // Has content but uses SPA container — could be SSR with hydration
-        ssrScore += 2;
-        signals.push(`SSR: SPA container with pre-rendered content (#${rootDiv.id})`);
-      }
-    }
-
-    // Check body content length
-    const body = root.querySelector('body');
-    const bodyText = body ? body.textContent.trim() : '';
     
-    if (bodyText.length < 500) {
-      spaScore += 2;
-      signals.push(`SPA: minimal body content (${bodyText.length} chars)`);
-    } else {
-      ssrScore += 2;
-      signals.push(`SSR: substantial body content (${bodyText.length} chars)`);
+    if (root.querySelector('link[rel="canonical"]')) { ssrScore += 10; signals.push('SSR: canonical tag in raw HTML'); }
+    if (root.querySelector('meta[property="og:title"]')) { ssrScore += 10; signals.push('SSR: og:title in raw HTML'); }
+    if (rawHtml.length > 5000) { ssrScore += 10; signals.push('SSR: massive raw content (>5000)'); }
+
+    // === SPA Detection (Max 100) ===
+    if (rawHtml.length < 1000) {
+      spaScore += 50;
+      signals.push(`SPA: rawHtml < 1000 chars (${rawHtml.length})`);
     }
 
-    // Check for JS framework bundles
-    const scriptSrcs = scripts
-      .map(s => s.getAttribute('src') || '')
-      .filter(Boolean);
-
-    const frameworkPatterns = [
-      { pattern: /react|_next|__next/i, name: 'React/Next.js' },
-      { pattern: /vue|nuxt/i, name: 'Vue/Nuxt' },
-      { pattern: /angular|ng-/i, name: 'Angular' },
-      { pattern: /svelte/i, name: 'Svelte' },
-    ];
-
-    for (const { pattern, name } of frameworkPatterns) {
-      if (scriptSrcs.some(src => pattern.test(src)) ||
-          inlineScriptContent.match(pattern)) {
-        spaScore += 2;
-        signals.push(`SPA: ${name} framework detected`);
-      }
+    const rootDiv = root.querySelector('#root') || root.querySelector('#app') || root.querySelector('#__next');
+    if (rootDiv && rootDiv.textContent.trim().length < 50) {
+      spaScore += 30;
+      signals.push(`SPA: empty container in raw (#${rootDiv.id || 'app'})`);
     }
 
-    // Check for large number of script bundles (typical SPA)
+    const scriptSrcs = scripts.map(s => s.getAttribute('src') || '').filter(Boolean);
     if (scriptSrcs.length > 5) {
-      spaScore += 1;
+      spaScore += 10;
       signals.push(`SPA: many script bundles (${scriptSrcs.length})`);
-    }
-
-    // === SSR Detection ===
-    // Check for server-rendered content indicators
-    const hasMultipleTextNodes = bodyText.length > 1000;
-    if (hasMultipleTextNodes) {
-      ssrScore += 1;
-      signals.push('SSR: rich text content in initial HTML');
-    }
-
-    // Noscript tag with content suggests SSR fallback
-    const noscript = root.querySelector('noscript');
-    if (noscript && noscript.textContent.trim().length > 0) {
-      ssrScore += 1;
-      signals.push('SSR: noscript fallback content found');
     }
 
   } catch (error) {
     log.warn(`Detection parsing error for ${url}`, { error: error.message });
     signals.push(`Error during detection: ${error.message}`);
-    // Default to SPA as safest strategy (waits for all network)
-    spaScore += 5;
-    signals.push('Defaulting to SPA strategy (safest)');
+    spaScore += 50;
   }
 
-  // Determine type using hierarchy: PWA > SPA > SSR
+  // Determine type using hierarchy: PWA > SSR > SPA (Priority order)
   let type, confidence;
-  const totalScore = pwaScore + spaScore + ssrScore;
 
-  if (pwaScore >= 4) {
+  if (pwaScore >= 40 || (pwaScore > ssrScore && pwaScore > spaScore)) {
     type = 'PWA';
-    confidence = Math.min(100, Math.round((pwaScore / Math.max(totalScore, 1)) * 100));
-  } else if (spaScore > ssrScore) {
-    type = 'SPA';
-    confidence = Math.min(100, Math.round((spaScore / Math.max(totalScore, 1)) * 100));
-  } else if (ssrScore > 0) {
+    confidence = Math.min(99, Math.max(75, pwaScore));
+  } else if (ssrScore > spaScore) {
     type = 'SSR';
-    confidence = Math.min(100, Math.round((ssrScore / Math.max(totalScore, 1)) * 100));
+    confidence = Math.min(99, Math.max(85, ssrScore));
+  } else if (spaScore > 0) {
+    type = 'SPA';
+    confidence = Math.min(99, Math.max(85, spaScore));
   } else {
     type = 'SPA'; // Default fallback
     confidence = 50;
@@ -173,17 +110,23 @@ async function fetchRawHtml(url) {
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'WebCrawlerBot/1.0 (Node.js; Detection Phase)',
-        'Accept': 'text/html,application/xhtml+xml',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
       },
       redirect: 'follow',
     });
 
     if (!response.ok) {
+      log.warn(`Fetch failed for ${url}: ${response.status} ${response.statusText}`);
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    return await response.text();
+    const text = await response.text();
+    log.debug(`Fetch raw HTML success: ${text.length} chars`);
+    return text;
   } finally {
     clearTimeout(timeout);
   }

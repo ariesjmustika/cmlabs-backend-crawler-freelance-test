@@ -24,6 +24,12 @@ class PWAStrategy extends BaseStrategy {
    */
   async postLoad(page, options) {
     try {
+      // Wait for links to appear (especially important for SPA-based PWAs)
+      await page.waitForSelector('a[href]', { timeout: 5000 }).catch(() => {
+        this.log.debug('No <a> links found within timeout');
+      });
+      await page.waitForTimeout(2000); // Give it more time to stabilize rendering for Next.js
+
       // Check SW registration status
       const swStatus = await page.evaluate(async () => {
         if (!('serviceWorker' in navigator)) {
@@ -31,15 +37,15 @@ class PWAStrategy extends BaseStrategy {
         }
 
         try {
-          const registration = await navigator.serviceWorker.getRegistration();
-          if (registration) {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          if (registrations && registrations.length > 0) {
+            const reg = registrations[0];
             return {
               supported: true,
               registered: true,
-              scope: registration.scope,
-              active: !!registration.active,
-              waiting: !!registration.waiting,
-              installing: !!registration.installing,
+              count: registrations.length,
+              scope: reg.scope,
+              active: !!reg.active,
             };
           }
           return { supported: true, registered: false };
@@ -56,12 +62,36 @@ class PWAStrategy extends BaseStrategy {
         await page.waitForTimeout(2000);
       }
 
+      // Explicitly wait 1000ms after load to give SW time to register
+      await page.waitForTimeout(1000);
+
+      // Check navigator.serviceWorker.ready with a strict timeout (avoid infinite hang)
+      await page.evaluate(async () => {
+        if ('serviceWorker' in navigator && navigator.serviceWorker.ready) {
+          await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise(resolve => setTimeout(resolve, 2000))
+          ]);
+        }
+      }).catch(() => {});
+
       // Also wait for any SPA-like container content (PWAs are often SPAs too)
       await page.waitForFunction(() => {
-        return document.body.textContent.trim().length > 200;
-      }, { timeout: 5000 }).catch(() => {
+        return document.body.innerHTML.length > 500;
+      }, { timeout: 10000 }).catch(() => {
         this.log.debug('PWA content wait timed out, proceeding');
       });
+
+      // Refine confidence: if we have an active SW controller, it's definitely a PWA
+      const hasActiveController = await page.evaluate(() => !!navigator.serviceWorker.controller);
+      if (hasActiveController) {
+        return {
+          detectionUpdate: {
+            confidence: 95,
+            signal: 'PWA: active service worker controller confirmed in rendered page'
+          }
+        };
+      }
 
     } catch (error) {
       this.log.debug('PWA post-load check skipped', { error: error.message });
