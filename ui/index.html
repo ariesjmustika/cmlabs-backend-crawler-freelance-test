@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Crawler Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: rgba(255,255,255,0.04);
+      --surface-hover: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.08);
+      --text: #e4e4e7;
+      --text-dim: #71717a;
+      --accent: #818cf8;
+      --accent-glow: rgba(129,140,248,0.25);
+      --green: #34d399;
+      --red: #f87171;
+      --blue: #60a5fa;
+      --purple: #a78bfa;
+      --orange: #fb923c;
+      --radius: 12px;
+      --font: 'Inter', -apple-system, sans-serif;
+    }
+
+    body.light-theme {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-hover: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-dim: #64748b;
+      --accent: #4f46e5;
+      --accent-glow: rgba(79,70,229,0.25);
+      --green: #059669;
+      --red: #dc2626;
+      --blue: #2563eb;
+      --purple: #7c3aed;
+      --orange: #ea580c;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.08) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.06) 0%, transparent 50%),
+                  radial-gradient(ellipse at 50% 80%, rgba(59,130,246,0.05) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+      transition: background 0.3s;
+    }
+
+    body.light-theme::before {
+      background: radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.12) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.1) 0%, transparent 50%),
+                  radial-gradient(ellipse at 50% 80%, rgba(59,130,246,0.08) 0%, transparent 50%);
+    }
+
+    body.light-theme .card { box-shadow: 0 10px 30px rgba(0,0,0,0.03); }
+    body.light-theme .form-row input, body.light-theme .form-row select { background: #f8fafc; }
+    body.light-theme .form-row select option { background: #ffffff; color: var(--text); }
+    body.light-theme .modal { background: #ffffff; box-shadow: 0 20px 50px rgba(0,0,0,0.1); }
+
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; position: relative; z-index: 1; }
+
+    /* Header */
+    header { text-align: center; padding: 48px 0 32px; }
+    header h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #818cf8, #a78bfa, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    header p { color: var(--text-dim); font-size: 0.95rem; }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1.2rem;
+      transition: all 0.2s;
+      z-index: 10;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    .theme-toggle:hover { background: var(--surface-hover); transform: scale(1.05); }
+
+    /* Glass Card */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(20px);
+      padding: 24px;
+      margin-bottom: 20px;
+      transition: border-color 0.3s;
+    }
+    .card:hover { border-color: rgba(255,255,255,0.12); }
+    .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+    /* Crawl Form */
+    .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .form-row input, .form-row select {
+      flex: 1;
+      min-width: 200px;
+      padding: 12px 16px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-row input:focus, .form-row select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .form-row input::placeholder { color: var(--text-dim); }
+    .form-row select option { background: #1a1a2e; }
+
+    .btn {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--font);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: white;
+      box-shadow: 0 4px 15px rgba(99,102,241,0.3);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    .options-row { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+    .options-row label { font-size: 0.8rem; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+    .options-row input[type="number"] { width: 100px; padding: 8px 12px; font-size: 0.85rem; }
+    .options-row select { flex: unset; width: 130px; padding: 8px 12px; font-size: 0.85rem; }
+
+    /* Status indicator */
+    .status-bar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 18px;
+      border-radius: 8px;
+      margin-top: 14px;
+      font-size: 0.9rem;
+      animation: fadeIn 0.3s ease;
+    }
+    .status-bar.crawling { display: flex; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); }
+    .status-bar.success { display: flex; background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); color: var(--green); }
+    .status-bar.error { display: flex; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.2); color: var(--red); }
+
+    .spinner { width: 18px; height: 18px; border: 2px solid var(--accent-glow); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+    /* Results Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th { text-align: left; padding: 10px 14px; color: var(--text-dim); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    tr { transition: background 0.2s; }
+    tbody tr:hover { background: var(--surface-hover); }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .badge-spa { background: rgba(96,165,250,0.15); color: var(--blue); }
+    .badge-ssr { background: rgba(52,211,153,0.15); color: var(--green); }
+    .badge-pwa { background: rgba(167,139,250,0.15); color: var(--purple); }
+
+    .actions { display: flex; gap: 6px; }
+    .btn-sm {
+      padding: 5px 12px;
+      font-size: 0.78rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: var(--font);
+      transition: all 0.2s;
+    }
+    .btn-sm:hover { background: var(--surface-hover); color: var(--text); border-color: var(--accent); }
+
+    .empty-state { text-align: center; padding: 40px; color: var(--text-dim); }
+    .empty-state span { font-size: 2rem; display: block; margin-bottom: 10px; }
+
+    /* Detail Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 40px 20px;
+      overflow-y: auto;
+    }
+    .modal-overlay.active { display: flex; animation: fadeIn 0.2s ease; }
+    .modal {
+      background: #12121a;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 800px;
+      padding: 28px;
+      position: relative;
+    }
+    .modal-close {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.4rem;
+      cursor: pointer;
+      padding: 4px;
+      line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+    .modal h3 { font-size: 1.2rem; margin-bottom: 20px; }
+
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .detail-item { padding: 12px; background: var(--surface); border-radius: 8px; }
+    .detail-item .label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .detail-item .value { font-size: 0.95rem; font-weight: 500; word-break: break-all; }
+
+    .screenshot-preview { width: 100%; border-radius: 8px; border: 1px solid var(--border); margin-top: 12px; max-height: 400px; object-fit: contain; background: #000; }
+
+    .download-row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+    /* Stats Row */
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      text-align: center;
+    }
+    .stat-card .num { font-size: 1.8rem; font-weight: 700; background: linear-gradient(135deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card .lbl { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 640px) {
+      .container { padding: 14px; }
+      header h1 { font-size: 1.6rem; }
+      .form-row { flex-direction: column; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <button class="theme-toggle" id="themeToggle" title="Toggle Light/Dark Mode">☀️</button>
+    <header>
+      <h1>🕷️ Web Crawler</h1>
+      <p>Crawl SPA · SSR · PWA websites — extract HTML, metadata &amp; screenshots</p>
+    </header>
+
+    <div class="stats" id="stats">
+      <div class="stat-card"><div class="num" id="stat-total">0</div><div class="lbl">Total Crawls</div></div>
+      <div class="stat-card"><div class="num" id="stat-spa">0</div><div class="lbl">SPA Sites</div></div>
+      <div class="stat-card"><div class="num" id="stat-ssr">0</div><div class="lbl">SSR Sites</div></div>
+      <div class="stat-card"><div class="num" id="stat-pwa">0</div><div class="lbl">PWA Sites</div></div>
+    </div>
+
+    <div class="card">
+      <h2>🔗 New Crawl</h2>
+      <div class="form-row">
+        <input type="url" id="urlInput" placeholder="https://example.com" autocomplete="url">
+        <button class="btn btn-primary" id="crawlBtn" onclick="startCrawl()">🚀 Crawl</button>
+      </div>
+      <div class="options-row">
+        <label>Timeout <input type="number" id="optTimeout" value="30000" min="5000" max="60000" step="1000" class="form-row"></label>
+        <label>Extra Wait <input type="number" id="optWaitExtra" value="0" min="0" max="10000" step="500" class="form-row"></label>
+        <label>Browser
+          <select id="optBrowser" class="form-row">
+            <option value="chromium">Chromium</option>
+            <option value="firefox">Firefox</option>
+            <option value="webkit">WebKit</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="optFullPage" checked> Full Page</label>
+        <label><input type="checkbox" id="optForce"> Force Refresh</label>
+      </div>
+      <div class="status-bar" id="statusBar">
+        <div class="spinner"></div>
+        <span id="statusText">Crawling...</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>📊 Results</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Domain</th><th>Type</th><th>Title</th><th>Duration</th><th>Crawled At</th><th>Actions</th></tr></thead>
+          <tbody id="resultsBody">
+            <tr><td colspan="6"><div class="empty-state"><span>📭</span>No crawl results yet. Start by crawling a URL above.</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Modal -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <h3 id="modalTitle">Details</h3>
+      <div class="detail-grid" id="modalGrid"></div>
+      <div class="download-row" id="modalDownloads"></div>
+      <img class="screenshot-preview" id="modalScreenshot" style="display:none" alt="Screenshot">
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+
+    // Theme Switcher Logic
+    const themeToggle = document.getElementById('themeToggle');
+    const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+    const savedTheme = localStorage.getItem('theme');
+    
+    if (savedTheme === 'light' || (!savedTheme && prefersLight)) {
+      document.body.classList.add('light-theme');
+      themeToggle.textContent = '🌙';
+    }
+
+    themeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('light-theme');
+      const isLight = document.body.classList.contains('light-theme');
+      themeToggle.textContent = isLight ? '🌙' : '☀️';
+      localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    });
+
+    async function loadResults() {
+      try {
+        const res = await fetch(`${API}/results`);
+        const json = await res.json();
+        if (!json.success) return;
+        renderResults(json.data);
+        updateStats(json.data);
+      } catch (e) { console.error('Load results failed:', e); }
+    }
+
+    function updateStats(results) {
+      document.getElementById('stat-total').textContent = results.length;
+      document.getElementById('stat-spa').textContent = results.filter(r => r.siteType === 'SPA').length;
+      document.getElementById('stat-ssr').textContent = results.filter(r => r.siteType === 'SSR').length;
+      document.getElementById('stat-pwa').textContent = results.filter(r => r.siteType === 'PWA').length;
+    }
+
+    function renderResults(results) {
+      const tbody = document.getElementById('resultsBody');
+      if (!results.length) {
+        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><span>📭</span>No crawl results yet.</div></td></tr>';
+        return;
+      }
+      tbody.innerHTML = results.map(r => {
+        const badge = `badge-${(r.siteType || '').toLowerCase()}`;
+        const time = r.crawledAt ? new Date(r.crawledAt).toLocaleString() : '-';
+        return `<tr>
+          <td><strong>${r.domain}</strong></td>
+          <td><span class="badge ${badge}">${r.siteType || '?'}</span></td>
+          <td>${truncate(r.title || '-', 40)}</td>
+          <td>${r.duration ? r.duration + 'ms' : '-'}</td>
+          <td>${time}</td>
+          <td class="actions">
+            <button class="btn-sm" onclick="viewDetail('${r.domain}')">View</button>
+            <button class="btn-sm" onclick="downloadFile('${r.domain}','screenshot.png')">📸</button>
+            <button class="btn-sm" onclick="downloadFile('${r.domain}','index.html')">HTML</button>
+            <button class="btn-sm" onclick="downloadFile('${r.domain}','metadata.json')">JSON</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function truncate(str, n) { return str.length > n ? str.substring(0, n) + '…' : str; }
+
+    async function startCrawl() {
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) { alert('Please enter a URL'); return; }
+
+      const btn = document.getElementById('crawlBtn');
+      const bar = document.getElementById('statusBar');
+      const txt = document.getElementById('statusText');
+
+      btn.disabled = true;
+      bar.className = 'status-bar crawling';
+      txt.textContent = `Crawling ${url}...`;
+
+      try {
+        const body = {
+          url,
+          options: {
+            timeout: parseInt(document.getElementById('optTimeout').value) || 30000,
+            waitExtra: parseInt(document.getElementById('optWaitExtra').value) || 0,
+            browser: document.getElementById('optBrowser').value,
+            fullPage: document.getElementById('optFullPage').checked,
+            forceRefresh: document.getElementById('optForce').checked,
+          }
+        };
+
+        const res = await fetch(`${API}/crawl`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+
+        if (json.success) {
+          bar.className = 'status-bar success';
+          txt.textContent = `✅ Done! ${json.data.siteType} — ${json.data.duration}ms${json.data.fromCache ? ' (cached)' : ''}`;
+          loadResults();
+        } else {
+          bar.className = 'status-bar error';
+          txt.textContent = `❌ ${json.message || json.error}`;
+        }
+      } catch (e) {
+        bar.className = 'status-bar error';
+        txt.textContent = `❌ Network error: ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function viewDetail(domain) {
+      try {
+        const res = await fetch(`${API}/results/${domain}`);
+        const json = await res.json();
+        if (!json.success) return;
+        const d = json.data;
+
+        document.getElementById('modalTitle').textContent = d.metadata?.title || domain;
+
+        const grid = document.getElementById('modalGrid');
+        grid.innerHTML = [
+          item('URL', d.url),
+          item('Site Type', d.siteType),
+          item('Duration', d.duration + 'ms'),
+          item('Crawled At', new Date(d.crawledAt).toLocaleString()),
+          item('Language', d.metadata?.lang || '-'),
+          item('Description', truncate(d.metadata?.description || '-', 120)),
+          item('Internal Links', d.links?.totalInternal ?? '-'),
+          item('External Links', d.links?.totalExternal ?? '-'),
+          item('Images', d.assets?.totalImages ?? '-'),
+          item('Scripts', d.assets?.totalScripts ?? '-'),
+          item('Load Time', d.performance?.loadTime ? d.performance.loadTime + 'ms' : '-'),
+          item('FCP', d.performance?.firstContentfulPaint ? d.performance.firstContentfulPaint + 'ms' : '-'),
+        ].join('');
+
+        const dl = document.getElementById('modalDownloads');
+        dl.innerHTML = ['index.html','metadata.json','screenshot.png'].map(f =>
+          `<button class="btn-sm" onclick="downloadFile('${domain}','${f}')">${f}</button>`
+        ).join('');
+
+        const img = document.getElementById('modalScreenshot');
+        img.src = `${API}/download/${domain}/screenshot.png`;
+        img.style.display = 'block';
+        img.onerror = () => { img.style.display = 'none'; };
+
+        document.getElementById('modal').classList.add('active');
+      } catch (e) { console.error(e); }
+    }
+
+    function item(label, value) {
+      return `<div class="detail-item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function closeModal() { document.getElementById('modal').classList.remove('active'); }
+    document.getElementById('modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+    function downloadFile(domain, file) { window.open(`${API}/download/${domain}/${file}`, '_blank'); }
+
+    document.getElementById('urlInput').addEventListener('keydown', e => { if (e.key === 'Enter') startCrawl(); });
+
+    loadResults();
+  </script>
+</body>
+</html>
