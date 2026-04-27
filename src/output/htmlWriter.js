@@ -17,8 +17,8 @@ async function writeHtml(htmlContent, outputDir, baseUrl = null) {
   // Inject <base> tag if baseUrl is provided
   if (baseUrl) {
     finalHtml = htmlContent.replace(
-      '<head>',
-      `<head>\n    <base href="${baseUrl}">`
+      /<head[^>]*>/i,
+      (match) => `${match}\n    <base href="${baseUrl}">`
     );
   }
 

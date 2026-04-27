@@ -47,6 +47,9 @@ function createApp() {
   // Serve static UI dashboard
   app.use(express.static(path.join(__dirname, '../../ui')));
 
+  // Serve crawl results
+  app.use('/results', express.static(config.resultsDir));
+
   // Health check
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

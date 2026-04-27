@@ -57,6 +57,12 @@ class BaseStrategy {
     // Perform post-load hooks (override in subclasses)
     const postLoadResult = await this.postLoad(page, options);
 
+    // Auto-scroll to trigger lazy-loaded content
+    await this.autoScroll(page);
+
+    // Convert relative URLs to absolute for offline viewing
+    await this.absolutizeUrls(page);
+
     // Auto-hide overlays (cookie banners, popups) that block content
     await this.autoHideOverlays(page);
 
@@ -140,6 +146,143 @@ class BaseStrategy {
       document.body.style.setProperty('overflow', 'auto', 'important');
       document.body.style.setProperty('padding-right', '0px', 'important');
       document.documentElement.style.setProperty('overflow', 'auto', 'important');
+    });
+  }
+
+  /**
+   * Auto-scroll the page to trigger lazy-loading
+   * @param {import('playwright').Page} page
+   */
+  async autoScroll(page) {
+    this.log.debug('Auto-scrolling to trigger lazy-loaded content');
+    await page.evaluate(async () => {
+      await new Promise((resolve) => {
+        let totalHeight = 0;
+        const distance = 300;
+        const timer = setInterval(() => {
+          const scrollHeight = document.body.scrollHeight;
+          window.scrollBy(0, distance);
+          totalHeight += distance;
+
+          if (totalHeight >= scrollHeight) {
+            clearInterval(timer);
+            // Scroll back to top
+            window.scrollTo(0, 0);
+            resolve();
+          }
+        }, 100);
+
+        // Safety timeout
+        setTimeout(() => {
+          clearInterval(timer);
+          window.scrollTo(0, 0);
+          resolve();
+        }, 5000);
+      });
+    });
+
+    // Wait for any lazy images to load
+    await page.waitForTimeout(500);
+  }
+
+  /**
+   * Convert all relative URLs in the DOM to absolute URLs
+   * @param {import('playwright').Page} page
+   */
+  async absolutizeUrls(page) {
+    this.log.debug('Converting relative URLs to absolute');
+    await page.evaluate(() => {
+      const baseUrl = window.location.origin + window.location.pathname;
+      
+      const makeAbs = (attr) => {
+        const elements = document.querySelectorAll(`[${attr}]`);
+        elements.forEach(el => {
+          const val = el.getAttribute(attr);
+          if (!val || val.startsWith('data:') || val.startsWith('blob:') || val.startsWith('#')) return;
+
+          // If it's absolute already, skip
+          if (val.match(/^[a-z0-9]+:/i)) return;
+
+          try {
+            // Force absolute URL resolution
+            const abs = new URL(val, window.location.href).href;
+            el.setAttribute(attr, abs);
+          } catch (e) {}
+        });
+      };
+
+      makeAbs('src');
+      makeAbs('href');
+      makeAbs('poster');
+      makeAbs('action');
+      makeAbs('data-src');
+      makeAbs('data-srcset');
+      
+      // Handle srcset specifically
+      const srcsetElements = document.querySelectorAll('[srcset]');
+      srcsetElements.forEach(el => {
+        const srcset = el.getAttribute('srcset');
+        if (srcset) {
+          const absoluteSrcset = srcset.split(',').map(part => {
+            const bits = part.trim().split(/\s+/);
+            if (bits.length > 0) {
+              const url = bits[0];
+              const size = bits.slice(1).join(' ');
+              if (url && !url.match(/^[a-z0-9]+:/i) && !url.startsWith('data:')) {
+                try {
+                  const abs = new URL(url, window.location.href).href;
+                  return `${abs}${size ? ' ' + size : ''}`;
+                } catch (e) { return part; }
+              }
+            }
+            return part;
+          }).join(', ');
+          el.setAttribute('srcset', absoluteSrcset);
+        }
+      });
+
+      // Handle inline styles (background-image: url(...))
+      const styledElements = document.querySelectorAll('[style*="url("]');
+      styledElements.forEach(el => {
+        const style = el.getAttribute('style');
+        if (style) {
+          const newStyle = style.replace(/url\(['"]?([^'"]+)['"]?\)/g, (match, url) => {
+            if (url && !url.match(/^[a-z0-9]+:/i) && !url.startsWith('//') && !url.startsWith('data:')) {
+              try {
+                return `url("${new URL(url, window.location.href).href}")`;
+              } catch (e) { return match; }
+            }
+            return match;
+          });
+          if (style !== newStyle) el.setAttribute('style', newStyle);
+        }
+      });
+
+      // Force all images to be eager and visible
+      const images = document.querySelectorAll('img');
+      images.forEach(img => {
+        img.setAttribute('loading', 'eager');
+        img.removeAttribute('decoding');
+        // Ensure no visibility:hidden or opacity:0 from lazy-load libraries
+        img.style.opacity = '1';
+        img.style.visibility = 'visible';
+        
+        // Swap data-src to src if src is empty or placeholder
+        const dataSrc = img.getAttribute('data-src') || img.getAttribute('data-original');
+        if (dataSrc && (!img.src || img.src.includes('data:image'))) {
+          try {
+            img.src = new URL(dataSrc, window.location.href).href;
+          } catch (e) {}
+        }
+      });
+
+      // Remove all scripts to prevent hydration issues (Next.js re-rendering relative paths)
+      const scripts = document.querySelectorAll('script');
+      scripts.forEach(s => s.remove());
+
+      // Remove prefetch links
+      const prefetches = document.querySelectorAll('link[rel="preload"], link[rel="prefetch"]');
+      prefetches.forEach(p => p.remove());
     });
   }
 
