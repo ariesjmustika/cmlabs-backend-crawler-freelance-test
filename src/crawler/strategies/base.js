@@ -57,6 +57,9 @@ class BaseStrategy {
     // Perform post-load hooks (override in subclasses)
     const postLoadResult = await this.postLoad(page, options);
 
+    // Auto-hide overlays (cookie banners, popups) that block content
+    await this.autoHideOverlays(page);
+
     // Extract all data in parallel
     const [metadata, links, assets, performance] = await Promise.all([
       this.extractMetadata(page),
@@ -91,6 +94,56 @@ class BaseStrategy {
   }
 
   /**
+   * Auto-hide intrusive overlays like cookie banners and newsletter popups
+   * This makes the saved HTML snapshot much cleaner.
+   */
+  async autoHideOverlays(page) {
+    this.log.debug('Hiding intrusive overlays');
+    await page.evaluate(() => {
+      // Selectors for common annoying overlays
+      const overlaySelectors = [
+        '.modal', '.modal-backdrop', '.fade.show',
+        '[class*="modal"]', '[id*="modal"]',
+        '[class*="popup"]', '[id*="popup"]',
+        '[class*="overlay"]', '[id*="overlay"]',
+        '[class*="cookie"]', '[id*="cookie"]',
+        '[class*="consent"]', '[id*="consent"]',
+        '[class*="newsletter"]', '[id*="newsletter"]',
+        '[class*="popup-banner"]', '[id*="popup-banner"]',
+        '.sp-fancybox-wrap', '.fancybox-overlay',
+        '#onesignal-slidedown-container', '.onesignal-slidedown-dialog'
+      ];
+
+      overlaySelectors.forEach(selector => {
+        try {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach(el => {
+            const style = window.getComputedStyle(el);
+            // Hide if it looks like an overlay or has high z-index
+            if (
+              style.position === 'fixed' || 
+              style.position === 'absolute' || 
+              parseInt(style.zIndex) > 1000 ||
+              el.classList.contains('modal') ||
+              el.classList.contains('show')
+            ) {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+              el.style.setProperty('opacity', '0', 'important');
+            }
+          });
+        } catch (e) {}
+      });
+
+      // Unlock scroll and remove modal-related body classes
+      document.body.classList.remove('modal-open');
+      document.body.style.setProperty('overflow', 'auto', 'important');
+      document.body.style.setProperty('padding-right', '0px', 'important');
+      document.documentElement.style.setProperty('overflow', 'auto', 'important');
+    });
+  }
+
+  /**
    * Extract page metadata
    * @param {import('playwright').Page} page
    * @returns {Promise<Object>}
@@ -100,6 +153,27 @@ class BaseStrategy {
       const getMeta = (name) => {
         const el = document.querySelector(`meta[name="${name}"], meta[property="${name}"]`);
         return el ? el.getAttribute('content') : null;
+      };
+
+      const getIcons = () => {
+        const icons = [];
+        const links = document.querySelectorAll('link[rel*="icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]');
+        links.forEach(link => {
+          icons.push({
+            rel: link.rel,
+            href: link.href,
+            sizes: link.getAttribute('sizes') || null,
+            type: link.getAttribute('type') || null
+          });
+        });
+        
+        // Also look for manifest
+        const manifest = document.querySelector('link[rel="manifest"]');
+        if (manifest) {
+          icons.push({ rel: 'manifest', href: manifest.href });
+        }
+        
+        return icons;
       };
 
       const getFavicon = () => {
@@ -114,6 +188,7 @@ class BaseStrategy {
         keywords: getMeta('keywords') || null,
         author: getMeta('author') || null,
         favicon: getFavicon(),
+        icons: getIcons(),
         lang: document.documentElement.lang || null,
         ogTitle: getMeta('og:title') || null,
         ogImage: getMeta('og:image') || null,

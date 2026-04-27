@@ -6,6 +6,7 @@
  * Usage:
  *   node index.js serve                    — Start API server
  *   node index.js crawl <url> [options]    — CLI single crawl
+ *   node index.js batch <urls...> [options] — CLI batch crawl (space separated)
  * 
  * CLI Options:
  *   --timeout <ms>       Crawl timeout (default: 30000)
@@ -35,6 +36,10 @@ async function main() {
         await runCLICrawl();
         break;
 
+      case 'batch':
+        await runBatchCrawl();
+        break;
+
       case 'help':
       case '--help':
       case '-h':
@@ -43,7 +48,7 @@ async function main() {
 
       default:
         // If it looks like a URL, treat it as a crawl command
-        if (command.startsWith('http') || command.includes('.')) {
+        if (command && (command.startsWith('http') || command.includes('.'))) {
           args.unshift('crawl');
           await runCLICrawl();
         } else {
@@ -64,36 +69,62 @@ async function startServer() {
 }
 
 async function runCLICrawl() {
-  const url = args[1] || args[0];
+  const { url, options } = parseCLIArgs(args);
 
-  if (!url || url.startsWith('--')) {
+  if (!url) {
     console.error('Error: URL is required');
     console.log('Usage: node index.js crawl <url> [options]');
     process.exit(1);
   }
 
-  // Parse CLI options
-  const options = {};
-  for (let i = 2; i < args.length; i++) {
-    switch (args[i]) {
-      case '--timeout':
-        options.timeout = parseInt(args[++i]);
-        break;
-      case '--no-fullpage':
-        options.fullPage = false;
-        break;
-      case '--wait-extra':
-        options.waitExtra = parseInt(args[++i]);
-        break;
-      case '--browser':
-        options.browser = args[++i];
-        break;
-      case '--force':
-        options.forceRefresh = true;
-        break;
+  const browserManager = require('./src/crawler/browser');
+  try {
+    await executeCrawl(url, options);
+    await browserManager.shutdown();
+    process.exit(0);
+  } catch (error) {
+    await browserManager.shutdown();
+    process.exit(1);
+  }
+}
+
+/**
+ * Run multiple crawls sequentially
+ */
+async function runBatchCrawl() {
+  const urls = args.slice(1).filter(a => !a.startsWith('--') && (a.startsWith('http') || a.includes('.')));
+  const { options } = parseCLIArgs(args);
+
+  if (urls.length === 0) {
+    console.error('Error: At least one URL is required');
+    console.log('Usage: node index.js batch <url1> <url2> ... [options]');
+    process.exit(1);
+  }
+
+  console.log(`\n🕷️  Web Crawler — Batch Mode (${urls.length} targets)`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+  const browserManager = require('./src/crawler/browser');
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    console.log(`\n[${i + 1}/${urls.length}] Target: ${url}`);
+    try {
+      await executeCrawl(url, options);
+    } catch (error) {
+      console.error(`FAILED: ${url} - ${error.message}`);
     }
   }
 
+  console.log(`\n✅ Batch Crawl Complete`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+  await browserManager.shutdown();
+  process.exit(0);
+}
+
+/**
+ * Shared crawl execution logic
+ */
+async function executeCrawl(url, options) {
   const { crawl } = require('./src/crawler');
   const browserManager = require('./src/crawler/browser');
 
@@ -137,20 +168,47 @@ async function runCLICrawl() {
 
   } catch (error) {
     console.error(`\n❌ Crawl Failed: ${error.message}\n`);
-    process.exit(1);
-  } finally {
-    await browserManager.shutdown();
-    process.exit(0);
+    throw error;
   }
+}
+
+/**
+ * Parse CLI arguments into URL and options
+ */
+function parseCLIArgs(args) {
+  const options = {};
+  let url = null;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === 'crawl' || arg === 'batch') continue;
+
+    if (arg === '--timeout') {
+      options.timeout = parseInt(args[++i]);
+    } else if (arg === '--no-fullpage') {
+      options.fullPage = false;
+    } else if (arg === '--wait-extra') {
+      options.waitExtra = parseInt(args[++i]);
+    } else if (arg === '--browser') {
+      options.browser = args[++i];
+    } else if (arg === '--force') {
+      options.forceRefresh = true;
+    } else if (!url && !arg.startsWith('--')) {
+      url = arg;
+    }
+  }
+
+  return { url, options };
 }
 
 function printHelp() {
   console.log(`
-🕷️  Web Crawler API v1.0.0
+🕷️  Web Crawler API v1.1.0
 
 USAGE:
   node index.js serve                     Start API server (default)
   node index.js crawl <url> [options]     Crawl a single URL
+  node index.js batch <urls...> [options] Crawl multiple URLs
 
 OPTIONS:
   --timeout <ms>        Crawl timeout in ms (default: 30000)
@@ -163,16 +221,9 @@ OPTIONS:
 EXAMPLES:
   node index.js serve
   node index.js crawl https://cmlabs.co
+  node index.js batch https://apple.com https://sequence.day --force
   node index.js crawl https://apple.com/id/ --browser firefox --force
   node index.js crawl https://sequence.day --timeout 45000
-
-API ENDPOINTS:
-  POST /api/crawl              Trigger a crawl job
-  GET  /api/results            List all results
-  GET  /api/results/:domain    Get result by domain
-  GET  /api/download/:d/:f     Download file
-  GET  /api/status             System status
-  GET  /health                 Health check
 `);
 }
 
